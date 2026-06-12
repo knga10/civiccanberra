@@ -1,0 +1,1810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Your ACT Budget, Personally — 2026-27</title>
+<meta name="description" content="A personal breakdown of the ACT Budget 2026-27 based on your household details." />
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script type="text/babel" data-presets="react">
+const { useState, useMemo } = React;
+
+/* ---------------------------------------------------------
+   "What's In It For Me" — ACT Budget 2026-27
+   A personal statement, styled like an annual notice from
+   the Territory: ledger lines, a wax-stamp relevance score,
+   and a running tally of items that touch your life.
+--------------------------------------------------------- */
+
+const REGIONS = [
+  "Belconnen", "Gungahlin", "Inner North", "Inner South",
+  "Molonglo Valley", "North Canberra", "South Canberra",
+  "Tuggeranong", "Weston Creek", "Woden Valley", "Outside ACT",
+];
+
+const SOURCE_PDF = "https://www.treasury.act.gov.au/__data/assets/pdf_file/0003/3080658/ACT-Budget-at-a-Glance-2026-27.pdf";
+
+// Links to the matching section in the bundled reference page
+// (budget-reference.html), which mirrors the official "ACT Budget
+// at a Glance 2026-27" text with an anchor on each section heading.
+// This avoids relying on PDF #page= anchors, which aren't supported
+// consistently across browsers/viewers.
+function refSection(anchorId) {
+  return `budget-reference.html#${anchorId}`;
+}
+
+// Each budget item: id, headline figure, description, and
+// rules describing which profile attributes make it relevant.
+const BUDGET_ITEMS = [
+  {
+    id: "fhb-stamp-duty",
+    category: "Housing",
+    source: refSection("stamp-duty"),
+    title: "Stamp duty abolished for first home buyers",
+    figure: "$0 stamp duty",
+    detail:
+      "First home buyers and eligible pensioners no longer pay stamp duty on a home purchase.",
+    relevance: (p) => p.firstHomeBuyer ? 100 : p.tenure === "renting" ? 35 : 10,
+    why: (p) =>
+      p.firstHomeBuyer
+        ? "You told us you're looking to buy your first home — this removes stamp duty entirely from that purchase."
+        : p.tenure === "renting"
+        ? "You're currently renting. If buying becomes an option, this concession removes a major upfront cost."
+        : "This mainly benefits first home buyers; less direct relevance if you already own.",
+  },
+  {
+    id: "unit-stamp-duty",
+    category: "Housing",
+    source: refSection("stamp-duty"),
+    title: "Stamp duty removed on new unit-titled 'missing middle' homes",
+    figure: "$0 duty on eligible units",
+    detail:
+      "Permanent, expanded concession for owner-occupiers buying off-the-plan or turn-key units, terraces and townhouses.",
+    relevance: (p) =>
+      p.tenure === "buying" || p.housingType === "unit" || p.downsizing ? 80 : p.tenure === "renting" ? 30 : 15,
+    why: (p) =>
+      p.downsizing
+        ? "You're considering downsizing — this directly removes duty if you move into a new unit, terrace or townhouse."
+        : p.housingType === "unit"
+        ? "You live in (or want) a unit-style home — new owner-occupier purchases in this category are now duty-free."
+        : "Relevant if you're considering a move into missing-middle housing (terraces, townhouses, units).",
+  },
+  {
+    id: "disability-duty",
+    category: "Housing",
+    source: refSection("stamp-duty"),
+    title: "Disability Duty Concession Scheme expanded",
+    figure: "$0 duty, any price",
+    detail:
+      "Eligible buyers under the Disability Duty Concession Scheme pay no stamp duty regardless of property price.",
+    relevance: (p) => (p.disability ? 95 : 5),
+    why: (p) =>
+      p.disability
+        ? "You indicated a household member qualifies under a disability scheme — this removes stamp duty entirely on your purchase."
+        : "Only relevant to households with a member eligible under the Disability Duty Concession Scheme.",
+  },
+  {
+    id: "pensioner-duty",
+    category: "Housing",
+    source: refSection("stamp-duty"),
+    title: "Pensioner Duty Concession expanded",
+    figure: "Expanded eligibility",
+    detail:
+      "Now includes Service Pension recipients with permanent incapacity to work; DVA Gold Card holders lose the 12-month wait.",
+    relevance: (p) => (p.pensioner || p.veteran ? 90 : 5),
+    why: (p) =>
+      p.veteran
+        ? "As a veteran/DVA Gold Card holder, the 12-month waiting period for this concession is now removed."
+        : p.pensioner
+        ? "As a pensioner, you may now qualify for an expanded duty concession on a home purchase."
+        : "Relevant to pensioners and eligible veterans purchasing a home.",
+  },
+  {
+    id: "lvc-remission",
+    category: "Housing",
+    source: refSection("planning-supply"),
+    title: "50% Lease Variation Charge remission (RZ1/RZ2)",
+    figure: "50% off LVC",
+    detail:
+      "Temporary remission for missing-middle developments in Suburban and Suburban Core zones, with construction deadlines to 2030.",
+    relevance: (p) => (p.developer || p.housingType === "unit" ? 50 : 10),
+    why: () =>
+      "Mainly relevant if you're building or buying into a new missing-middle development (dual occupancy, triplex, terrace, townhouse) in RZ1/RZ2 zones.",
+  },
+  {
+    id: "public-housing",
+    category: "Housing",
+    source: refSection("public-housing"),
+    title: "450 new public housing dwellings + repairs uplift",
+    figure: "$360m+ / $183m repairs",
+    detail:
+      "Growth toward 13,200 public housing dwellings by 2030, plus $180m+ for repairs and maintenance, prioritising vacant property upgrades.",
+    relevance: (p) => (p.publicHousing ? 100 : p.lowIncome ? 40 : 5),
+    why: (p) =>
+      p.publicHousing
+        ? "You're a public housing tenant — this funds faster repairs, vacant-property upgrades and more housing supply in the system you rely on."
+        : "Relevant mainly to public/community housing tenants and applicants.",
+  },
+  {
+    id: "housing-crisis-fund",
+    category: "Housing",
+    source: refSection("homelessness"),
+    title: "New Housing Crisis Support Fund",
+    figure: "Up to $2,500 rent + $250 payment",
+    detail:
+      "Grants covering up to 4 weeks' rent (capped at $2,500) and a new $250 Crisis Support Payment for households in rental stress.",
+    relevance: (p) => (p.tenure === "renting" && p.lowIncome ? 85 : p.tenure === "renting" ? 30 : 5),
+    why: (p) =>
+      p.tenure === "renting"
+        ? "As a renter, this fund is a safety net if you face short-term financial hardship affecting your rent."
+        : "Targeted at renters experiencing financial stress.",
+  },
+
+  // Community / safety
+  {
+    id: "dfsv-funding",
+    category: "Community & Safety",
+    source: refSection("community-support"),
+    title: "Domestic, family & sexual violence services",
+    figure: "$44.2m",
+    detail:
+      "Secure, long-term funding for frontline DFSV services and the new ACT DFSV Strategy 2026–2036.",
+    relevance: () => 30,
+    why: () =>
+      "Strengthens frontline support services available to anyone in the community affected by domestic or family violence.",
+  },
+  {
+    id: "food-relief",
+    category: "Community & Safety",
+    source: refSection("community-other"),
+    title: "Additional food relief & emergency material aid",
+    figure: "Expanded support",
+    detail:
+      "Extra funding for food relief and emergency aid, partly in response to fuel-driven cost pressures.",
+    relevance: (p) => (p.lowIncome ? 70 : 20),
+    why: (p) =>
+      p.lowIncome
+        ? "If your household is feeling cost-of-living pressure, this expands access to emergency food and material aid services."
+        : "A community safety net available to anyone facing acute financial pressure.",
+  },
+  {
+    id: "multicultural-festival",
+    category: "Community & Safety",
+    source: refSection("community-other"),
+    title: "National Multicultural Festival & migrant support",
+    figure: "Ongoing funding",
+    detail:
+      "Continued funding for the National Multicultural Festival, Gender Pathways Peer Navigation Service, and Family Settlement Assistance Grants / Humanitarian Fund.",
+    relevance: (p) => (p.immigrant ? 75 : 25),
+    why: (p) =>
+      p.immigrant
+        ? "As a migrant to Canberra, Family Settlement Assistance Grants and the Humanitarian Fund may directly support your settlement journey, alongside the Multicultural Festival."
+        : "Supports Canberra's multicultural community and events calendar.",
+  },
+  {
+    id: "atsi-investment",
+    category: "Community & Safety",
+    source: refSection("atsi"),
+    title: "Aboriginal & Torres Strait Islander investment",
+    figure: "$1.2m + $1.9m + $0.5m + $0.75m",
+    detail:
+      "Perinatal mental health Safe Space, health workforce boost, Yerrabi Yurwang housing project support, Truth Telling (Seed of Truth) Project.",
+    relevance: (p) => (p.indigenous ? 100 : 15),
+    why: (p) =>
+      p.indigenous
+        ? "These initiatives — health workforce growth, perinatal support, and the Yerrabi Yurwang Moncrieff housing project — are aimed at improving outcomes for Aboriginal and Torres Strait Islander Canberrans."
+        : "Targeted investment in Aboriginal and Torres Strait Islander health, housing and cultural programs.",
+  },
+
+  // Justice
+  {
+    id: "ambulance-fire",
+    category: "Justice & Emergency Services",
+    source: refSection("justice"),
+    title: "More paramedics & Molonglo Fire Station",
+    figure: "$198.3m (4 yrs, justice & emergency)",
+    detail:
+      "Additional ACT Ambulance Service resourcing and new firefighters for the Molonglo Emergency Services Station.",
+    relevance: (p) => (p.region === "Molonglo Valley" ? 80 : 25),
+    why: (p) =>
+      p.region === "Molonglo Valley"
+        ? "You're in Molonglo Valley — a new fire station with dedicated firefighters is being established for your growing area."
+        : "Broadly improves emergency response capacity across Canberra.",
+  },
+  {
+    id: "gun-buyback",
+    category: "Justice & Emergency Services",
+    source: refSection("justice-other"),
+    title: "National gun buyback & Firearms Registry digitisation",
+    figure: "Implementation funded",
+    detail: "Implementation of the national gun buyback scheme and digitisation of the ACT Firearms Registry.",
+    relevance: (p) => (p.firearmsOwner ? 70 : 10),
+    why: (p) =>
+      p.firearmsOwner
+        ? "If you're a registered firearms owner, the Registry digitisation may change how you manage licensing and registration."
+        : "Relevant to registered firearms owners and dealers.",
+  },
+
+  // Health
+  {
+    id: "northside-hospital",
+    category: "Health",
+    source: refSection("northside-hospital"),
+    title: "New Northside Hospital",
+    figure: "$1.3b over 7 years",
+    detail:
+      "Seven-storey clinical building: 14-bed ICU, paediatric ED, Birth Centre with 6 birthing suites, 8 operating theatres, 200+ new inpatient beds.",
+    relevance: (p) =>
+      ["Belconnen", "Gungahlin", "North Canberra"].includes(p.region) ? 75 : 45,
+    why: (p) =>
+      ["Belconnen", "Gungahlin", "North Canberra"].includes(p.region)
+        ? "You're on Canberra's northside — this hospital becomes your nearest major acute care facility, including a new Birth Centre and paediatric ED."
+        : "A major new acute care facility for the whole Territory, including expanded maternity and ICU capacity.",
+  },
+  {
+    id: "abortion-services",
+    category: "Health",
+    source: refSection("health-other"),
+    title: "Free abortion services for ACT residents",
+    figure: "Additional funding",
+    detail: "Additional funding to support free abortion services for ACT residents.",
+    relevance: (p) => (p.gender === "female" ? 60 : 15),
+    why: () => "Expands free access to abortion services for ACT residents.",
+  },
+  {
+    id: "vad-reform",
+    category: "Health",
+    source: refSection("health-other"),
+    title: "Voluntary assisted dying reform (substitute decision-making)",
+    figure: "Reform development",
+    detail:
+      "Exploring models to access voluntary assisted dying after loss of decision-making capacity.",
+    relevance: (p) => (p.age >= 60 ? 50 : 15),
+    why: (p) =>
+      p.age >= 60
+        ? "Given your age bracket, this reform around end-of-life decision-making may become personally relevant over time."
+        : "A long-term policy reform relevant to end-of-life planning for all residents.",
+  },
+  {
+    id: "asd-services",
+    category: "Health",
+    source: refSection("health-other"),
+    title: "Expanded Autism Spectrum Disorder assessment services",
+    figure: "Service expansion",
+    detail: "Expansion of ASD assessment services across the ACT.",
+    relevance: (p) => (p.kids && p.kidsNeeds ? 90 : p.kids ? 30 : 10),
+    why: (p) =>
+      p.kids && p.kidsNeeds
+        ? "With a child who may need additional support, expanded ASD assessment services could shorten wait times for your family."
+        : "Relevant to families seeking developmental assessments for children.",
+  },
+
+  // Education
+  {
+    id: "preschool",
+    category: "Education",
+    source: refSection("early-childhood"),
+    title: "Free four-year-old preschool program",
+    figure: "$3m+ (2026-27)",
+    detail: "Continued free preschool for four-year-olds in ACT public schools through 2026 and 2027.",
+    relevance: (p) => (p.kids && p.kidsAges?.includes("under5") && p.school !== "private" ? 90 : p.kids ? 20 : 5),
+    why: (p) =>
+      p.kids && p.kidsAges?.includes("under5")
+        ? "If your child is approaching four, this gives them a free year of preschool in the public system before kindergarten."
+        : "Applies to families with a four-year-old enrolling in ACT public preschool.",
+  },
+  {
+    id: "school-projects",
+    category: "Education",
+    source: refSection("education"),
+    title: "Whitlam School Stage 2 & new Gungahlin college",
+    figure: "$46m+",
+    detail: "Construction funding for Stage 2 of the Whitlam School and a second college in Gungahlin.",
+    relevance: (p) =>
+      p.kids && p.school === "public" && p.region === "Gungahlin" ? 85 : p.kids && p.school === "public" ? 25 : 5,
+    why: (p) =>
+      p.kids && p.school === "public" && p.region === "Gungahlin"
+        ? "You're in Gungahlin with public-school kids — this funds a second college and could mean more local options as the area grows."
+        : "Adds public school capacity, mainly benefiting families in growth areas like Gungahlin.",
+  },
+  {
+    id: "school-cleaning-energy",
+    category: "Education",
+    source: refSection("education"),
+    title: "Electric heating upgrades & extra cleaning in public schools",
+    figure: "Funded",
+    detail: "Gas furnace replacements with electric reverse-cycle units, plus additional cleaning resourcing.",
+    relevance: (p) => (p.kids && p.school === "public" ? 60 : 10),
+    why: (p) =>
+      p.kids && p.school === "public"
+        ? "Your kids' public school may see warmer/cooler classrooms and cleaner facilities from this funding."
+        : "Applies to ACT public schools generally.",
+  },
+  {
+    id: "fee-free-tafe",
+    category: "Education",
+    source: refSection("workforce-tertiary"),
+    title: "Fee-free TAFE — 9,093 extra training places",
+    figure: "9,093 places",
+    detail:
+      "Extension of fee-free TAFE in healthcare, advanced tech, construction, hospitality and foundation skills.",
+    relevance: (p) => (p.studyingTafe || p.age <= 25 ? 70 : 25),
+    why: (p) =>
+      p.studyingTafe
+        ? "You indicated you're studying — this could mean a fee-free place in your course area."
+        : "Relevant if you or a household member is considering vocational training.",
+  },
+  {
+    id: "uow-campus",
+    category: "Education",
+    source: refSection("workforce-tertiary"),
+    title: "UNSW Canberra City Campus",
+    figure: "New campus",
+    detail: "Establishment of a new UNSW Canberra City Campus.",
+    relevance: (p) => (p.studyingUni || (p.kids && p.kidsAges?.includes("teen")) ? 55 : 20),
+    why: (p) =>
+      p.kids && p.kidsAges?.includes("teen")
+        ? "Another tertiary option in the city centre for when your teen considers university."
+        : "Expands tertiary education options in central Canberra.",
+  },
+
+  // Jobs/sport/culture
+  {
+    id: "basketball-stadium",
+    category: "Sport, Jobs & Culture",
+    source: refSection("basketball-stadium"),
+    title: "Belconnen Basketball Stadium expansion",
+    figure: "$37.5m",
+    detail:
+      "Courts increase from 4 to 7 (75% more), convertible show court seating 1,800, new amenities, solar + batteries.",
+    relevance: (p) =>
+      p.sports?.includes("basketball")
+        ? p.region === "Belconnen" ? 95 : 70
+        : p.region === "Belconnen" ? 40 : 10,
+    why: (p) =>
+      p.sports?.includes("basketball")
+        ? p.region === "Belconnen"
+          ? "Basketball is one of your interests and you're local to Belconnen — this is a major upgrade to your nearest stadium."
+          : "Basketball is one of your interests — this stadium expansion adds significant court capacity and a new show court for higher-level games."
+        : "A major recreation and events facility upgrade in Belconnen.",
+  },
+  {
+    id: "major-event-fund",
+    category: "Sport, Jobs & Culture",
+    source: refSection("jobs-other"),
+    title: "Major Event Fund expansion",
+    figure: "$7m",
+    detail: "Continuation and expansion of the Major Event Fund to attract high-quality events to Canberra.",
+    relevance: () => 25,
+    why: () => "More events, festivals and visitor drawcards across the city.",
+  },
+  {
+    id: "cricket-manuka",
+    category: "Sport, Jobs & Culture",
+    source: refSection("jobs-other"),
+    title: "International cricket at Manuka + women's sport funding",
+    figure: "Increased funding",
+    detail: "Support to host international cricket matches at Manuka with Cricket Australia, plus more support for local women's sporting teams.",
+    relevance: (p) => (p.sports?.includes("cricket") ? 80 : 15),
+    why: (p) =>
+      p.sports?.includes("cricket")
+        ? "As a cricket fan/player, this brings international matches to Manuka and boosts funding for local women's teams."
+        : "Brings higher-profile cricket events to Canberra.",
+  },
+  {
+    id: "arts-funding",
+    category: "Sport, Jobs & Culture",
+    source: refSection("jobs-other"),
+    title: "Arts organisation funding +25%",
+    figure: "$8m+",
+    detail: "25% increase plus indexation for ACT arts organisations.",
+    relevance: (p) => (p.interests?.includes("arts") ? 75 : 20),
+    why: (p) =>
+      p.interests?.includes("arts")
+        ? "More funding flows to the local arts organisations and venues you're likely to engage with."
+        : "Supports Canberra's arts sector broadly.",
+  },
+  {
+    id: "floriade",
+    category: "Sport, Jobs & Culture",
+    source: refSection("jobs-other"),
+    title: "Floriade extended hours (40th anniversary pilot)",
+    figure: "2-year pilot",
+    detail: "Extended operating hours for Floriade as a 2-year pilot coinciding with its 40th anniversary.",
+    relevance: () => 30,
+    why: () => "More time to visit Floriade each year during the pilot.",
+  },
+
+  // Transport / environment
+  {
+    id: "sydney-rail",
+    category: "Transport & Environment",
+    source: refSection("sydney-rail"),
+    title: "Canberra–Sydney Rail upgrade",
+    figure: "$25m (ACT share of $100m)",
+    detail: "Priority rail upgrades Canberra–Goulburn: level crossings, track layouts, station upgrades, future express services.",
+    relevance: (p) => (p.travelSydney ? 70 : 25),
+    why: (p) =>
+      p.travelSydney
+        ? "If you travel to Sydney regularly, this funds groundwork for faster, more reliable train services on that corridor."
+        : "Long-term improvement to the Canberra–Sydney rail corridor.",
+  },
+  {
+    id: "local-infra",
+    category: "Transport & Environment",
+    source: refSection("local-infrastructure"),
+    title: "Local shopping centre & infrastructure upgrades",
+    figure: "$65m+",
+    detail:
+      "Upgrades to Kingston, Chisholm, Cooleman Court (Weston) and Kippax shopping centres; Hall Village travel route & stormwater.",
+    relevance: (p) =>
+      ["Inner South", "Tuggeranong", "Weston Creek", "Gungahlin"].includes(p.region) &&
+      (p.region === "Inner South" || p.region === "Tuggeranong" || p.region === "Weston Creek" || p.region === "Gungahlin")
+        ? 70
+        : 25,
+    why: (p) => {
+      const map = {
+        "Inner South": "Kingston shopping centre upgrades are right in your area.",
+        Tuggeranong: "Chisholm shopping centre upgrades are local to you.",
+        "Weston Creek": "Cooleman Court (Weston) upgrades are local to you.",
+        Gungahlin: "Kippax and Hall Village improvements are in your broader area.",
+      };
+      return map[p.region] || "Shopping centre and streetscape upgrades across several Canberra suburbs.";
+    },
+  },
+  {
+    id: "sustainable-household",
+    category: "Transport & Environment",
+    source: refSection("climate-environment"),
+    title: "Sustainable Household Scheme loan cap raised to $20,000",
+    figure: "$20,000 cap",
+    detail: "Loan cap increased for all eligible products from 1 July 2026; electric cargo bikes now eligible.",
+    relevance: (p) => (p.tenure === "owner" || p.tenure === "buying" ? 85 : 15),
+    why: (p) =>
+      p.tenure === "owner" || p.tenure === "buying"
+        ? "As a homeowner, you can now borrow up to $20,000 through this scheme for solar, batteries, efficient appliances, or an electric cargo bike."
+        : "Mainly available to homeowners financing energy-efficiency upgrades.",
+  },
+  {
+    id: "renters-energy",
+    category: "Transport & Environment",
+    source: refSection("climate-environment"),
+    title: "Renters' Home Energy Program",
+    figure: "Continued",
+    detail: "Continuation of programs helping renters and low-income households manage home energy use.",
+    relevance: (p) => (p.tenure === "renting" ? 80 : 10),
+    why: (p) =>
+      p.tenure === "renting"
+        ? "As a renter, this program continues to offer support for managing your energy costs."
+        : "Targeted at renters and low-income households.",
+  },
+  {
+    id: "fare-cap",
+    category: "Transport & Environment",
+    source: refSection("public-transport"),
+    title: "Reduced monthly fare cap for tertiary students",
+    figure: "Lower cap",
+    detail: "The monthly public transport fare cap for tertiary students is being reduced.",
+    relevance: (p) => (p.studyingUni || p.studyingTafe || (p.kids && p.kidsAges?.includes("teen")) ? 70 : 10),
+    why: (p) =>
+      p.studyingUni || p.studyingTafe
+        ? "As a tertiary student, your monthly transport costs on light rail/buses will be capped lower."
+        : "Relevant if you or your older teens study at uni or TAFE and use public transport.",
+  },
+  {
+    id: "light-rail",
+    category: "Transport & Environment",
+    source: refSection("public-transport"),
+    title: "Light Rail Stage 2A — City to Commonwealth Park",
+    figure: "Continued delivery",
+    detail: "Continued construction of Light Rail Stage 2A toward Woden.",
+    relevance: (p) =>
+      ["Inner South", "Woden Valley", "North Canberra"].includes(p.region) ? 75 : 30,
+    why: (p) =>
+      ["Inner South", "Woden Valley", "North Canberra"].includes(p.region)
+        ? "This light rail extension runs through or toward your area, adding a new transport option."
+        : "Extends light rail toward Woden, eventually improving cross-town options.",
+  },
+  {
+    id: "restructure-fund",
+    category: "Jobs & Public Sector",
+    source: refSection("treasurer-message"),
+    title: "New Restructure Fund & limits on external contractors",
+    figure: "Agency-wide",
+    detail:
+      "A new Restructure Fund supports agencies to meet budgets and focus on government priorities; new measures limit the use of external contractors.",
+    relevance: (p) => (p.employment === "publicServant" ? 80 : 20),
+    why: (p) =>
+      p.employment === "publicServant"
+        ? "As an ACT public servant, agency restructuring and reduced reliance on external contractors may affect how your team or directorate operates."
+        : "Affects how ACT Government agencies are staffed and run.",
+  },
+  {
+    id: "small-business-stamp-duty",
+    category: "Jobs & Public Sector",
+    source: refSection("stamp-duty"),
+    title: "Commercial stamp duty tax-free threshold raised to $2.1m",
+    figure: "$2.1m threshold",
+    detail: "The commercial stamp duty tax-free threshold increases to $2.1 million, reducing upfront costs for buying commercial premises.",
+    relevance: (p) => (p.employment === "smallBusiness" || p.startingBusiness ? 75 : 15),
+    why: (p) =>
+      p.employment === "smallBusiness" || p.startingBusiness
+        ? "If you're buying commercial premises for your business, more of the purchase price is now exempt from stamp duty."
+        : "Reduces upfront costs for businesses purchasing commercial property.",
+  },
+  {
+    id: "business-advice-service",
+    category: "Jobs & Public Sector",
+    source: refSection("jobs-other"),
+    title: "Expanded Canberra Business Advice and Support Service",
+    figure: "Service expansion",
+    detail: "Expansion of the Canberra Business Advice and Support Service, alongside continued Screen Canberra funding for screen/digital/gaming projects.",
+    relevance: (p) => (p.employment === "smallBusiness" || p.startingBusiness ? 85 : p.techWorker ? 40 : 10),
+    why: (p) =>
+      p.startingBusiness
+        ? "If you're starting a business, this expanded service offers more advice and support pathways."
+        : p.employment === "smallBusiness"
+        ? "As a small business owner, this expanded advisory service may offer practical support."
+        : p.techWorker
+        ? "If you work in tech/screen/digital, continued Screen Canberra funding supports digital and gaming projects."
+        : "Supports small businesses and the screen/digital sector.",
+  },
+  {
+    id: "mental-health-investment",
+    category: "Health",
+    source: refSection("health"),
+    title: "Mental health & community wellbeing investment",
+    figure: "Part of $910m+ health package",
+    detail: "Part of the $910 million+ health investment is directed toward mental health and community wellbeing services, alongside hospital and infrastructure funding.",
+    relevance: (p) => (p.mentalHealthSupport ? 85 : 25),
+    why: (p) =>
+      p.mentalHealthSupport
+        ? "If you or someone in your household accesses mental health support, this investment may improve service availability."
+        : "Broad investment in mental health and wellbeing services across the ACT.",
+  },
+  {
+    id: "outpatient-transport",
+    category: "Health",
+    source: refSection("health-other"),
+    title: "Outpatient transport service for chronic conditions",
+    figure: "New service",
+    detail: "A new outpatient transport service supports individuals with chronic conditions to get to and from appointments.",
+    relevance: (p) => (p.chronicCondition ? 90 : 15),
+    why: (p) =>
+      p.chronicCondition
+        ? "If you manage a chronic condition requiring regular outpatient visits, this new transport service may directly help you."
+        : "Supports people with chronic conditions attending regular outpatient appointments.",
+  },
+  {
+    id: "prescription-monitoring",
+    category: "Health",
+    source: refSection("health-other"),
+    title: "Canberra Script & medicine/vaccination safety upgrades",
+    figure: "System upgrade",
+    detail: "Upgrades to Canberra Script, the Territory's real-time prescription monitoring system, supporting safer medicine management.",
+    relevance: (p) => (p.ndisParticipant || p.chronicCondition ? 60 : 15),
+    why: (p) =>
+      p.ndisParticipant || p.chronicCondition
+        ? "If you manage multiple prescriptions or supports, upgrades to real-time prescription monitoring may improve safety and coordination of your care."
+        : "Improves safety in how prescription medicines are tracked across the ACT.",
+  },
+  {
+    id: "carer-support",
+    category: "Community & Safety",
+    source: refSection("community-support"),
+    title: "Community sector uplift supports carer & disability services",
+    figure: "Part of $182.6m",
+    detail: "A permanent uplift to community sector organisations helps them retain staff and provide consistent care, including services relied on by carers and people with disability.",
+    relevance: (p) => (p.carer || p.ndisParticipant || p.disability ? 70 : 20),
+    why: (p) =>
+      p.carer
+        ? "As a carer, the community organisations you rely on for respite or support services are receiving longer-term funding certainty."
+        : p.ndisParticipant
+        ? "Community sector organisations supporting NDIS participants are receiving a funding uplift for staff retention and service quality."
+        : "Strengthens community organisations many households rely on.",
+  },
+  {
+    id: "bushfire-mitigation",
+    category: "Transport & Environment",
+    source: refSection("local-infrastructure"),
+    title: "Bushfire risk reduction in nature reserves and parks",
+    figure: "Ongoing funding",
+    detail: "Continued investment in fire trail maintenance, prescribed burns and vegetation management across Canberra's nature reserves and parks.",
+    relevance: (p) => (p.bushfireArea ? 85 : 20),
+    why: (p) =>
+      p.bushfireArea
+        ? "If you live near bushland or a nature reserve, this funds ongoing fire trail maintenance and prescribed burns that reduce risk to your property."
+        : "Reduces bushfire risk across Canberra's reserves and urban edge.",
+  },
+  {
+    id: "water-efficiency",
+    category: "Transport & Environment",
+    source: refSection("water"),
+    title: "Water efficiency programs (tapware, irrigation, Lake Tuggeranong)",
+    figure: "Program funding",
+    detail: "Replacement of inefficient household tapware, irrigation upgrades, consumer education, and water quality improvements at Lake Tuggeranong.",
+    relevance: (p) => (p.waterEfficiencyInterest || p.tenure === "owner" ? 55 : 20),
+    why: (p) =>
+      p.waterEfficiencyInterest
+        ? "Given your interest in sustainability, household tapware replacement programs and water efficiency education may be directly useful."
+        : p.tenure === "owner"
+        ? "As a homeowner, tapware replacement programs could reduce your water bills."
+        : "Improves water efficiency and quality across the Territory, including Lake Tuggeranong.",
+  },
+  {
+    id: "cycling-infrastructure",
+    category: "Transport & Environment",
+    source: refSection("local-infrastructure"),
+    title: "Active travel routes & electric cargo bikes added to loan scheme",
+    figure: "New routes + $20k loan eligibility",
+    detail: "New active travel routes (e.g. Hall Village to Gold Creek) and electric cargo bikes now eligible under the Sustainable Household Scheme.",
+    relevance: (p) => (p.cyclist ? 75 : 25),
+    why: (p) =>
+      p.cyclist
+        ? "As a cyclist, new active travel routes and the option to finance an electric cargo bike through the Sustainable Household Scheme are directly relevant."
+        : "Expands active travel infrastructure and options across Canberra.",
+  },
+  {
+    id: "public-transport-services",
+    category: "Transport & Environment",
+    source: refSection("public-transport"),
+    title: "Flexible public transport services & Woden Bus Depot",
+    figure: "Continued funding",
+    detail: "Continued weekday flexible public transport services for accessible transport needs, incentives for weekend drivers, and ongoing Woden Bus Depot operations.",
+    relevance: (p) => (p.publicTransportUser ? 75 : p.disability ? 50 : 20),
+    why: (p) =>
+      p.publicTransportUser
+        ? "As a regular public transport user, continued investment in services and the Woden depot supports reliability of your daily commute."
+        : p.disability
+        ? "Continued flexible transport services support accessible transport options for people with disability."
+        : "Supports the reliability of Canberra's bus and light rail network.",
+  },
+  {
+    id: "legal-aid",
+    category: "Justice & Emergency Services",
+    source: refSection("justice-other"),
+    title: "Grants of assistance for Legal Aid",
+    figure: "Ongoing funding",
+    detail: "Grants of assistance to vulnerable and low-income applicants for Legal Aid, plus ongoing funding for the community legal assistance sector.",
+    relevance: (p) => (p.appliesForLegalAid || p.lowIncome ? 70 : 10),
+    why: (p) =>
+      p.appliesForLegalAid
+        ? "If you may need to apply for Legal Aid, this continues funding for grants of assistance to low-income applicants."
+        : "A safety net for low-income Canberrans needing legal support.",
+  },
+  {
+    id: "volunteer-community-sector",
+    category: "Community & Safety",
+    source: refSection("treasurer-message"),
+    title: "Community sector funding reform",
+    figure: "Reform underway",
+    detail: "Further community sector funding reform is underway to deliver a longer-term model focused on meeting the community's changing needs.",
+    relevance: (p) => (p.volunteers ? 60 : 15),
+    why: (p) =>
+      p.volunteers
+        ? "If you volunteer with a community organisation, this reform aims to give the sector longer-term funding certainty — which can affect the organisation you support."
+        : "Affects how community organisations across the ACT are funded long-term.",
+  },
+];
+
+const CATEGORY_ORDER = [
+  "Housing",
+  "Community & Safety",
+  "Justice & Emergency Services",
+  "Health",
+  "Education",
+  "Jobs & Public Sector",
+  "Sport, Jobs & Culture",
+  "Transport & Environment",
+];
+
+const initialProfile = {
+  age: 35,
+  gender: "",
+  region: "",
+  tenure: "", // owner | renting | buying | publicHousing
+  firstHomeBuyer: false,
+  downsizing: false,
+  housingType: "", // house | unit
+  publicHousing: false,
+  lowIncome: false,
+  disability: false,
+  pensioner: false,
+  veteran: false,
+  immigrant: false,
+  indigenous: false,
+  firearmsOwner: false,
+  kids: false,
+  kidsAges: [],
+  kidsNeeds: false,
+  school: "", // public | private | none
+  studyingUni: false,
+  studyingTafe: false,
+  travelSydney: false,
+  sports: [],
+  interests: [],
+
+  // --- additional profile attributes ---
+  employment: "", // employee | publicServant | smallBusiness | unemployed | retired
+  household: "", // single | couple | family | sharehouse | other
+  carer: false,
+  publicTransportUser: false,
+  driver: false,
+  cyclist: false,
+  petOwner: false,
+  ndisParticipant: false,
+  mentalHealthSupport: false,
+  chronicCondition: false,
+  rentalProperty: false, // owns an investment property
+  startingBusiness: false,
+  appliesForLegalAid: false,
+  bushfireArea: false,
+  waterEfficiencyInterest: false,
+  volunteers: false,
+  techWorker: false,
+};
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function relevanceLabel(score) {
+  if (score >= 75) return { label: "High impact", tone: "high" };
+  if (score >= 40) return { label: "Some impact", tone: "mid" };
+  return { label: "Low impact", tone: "low" };
+}
+
+const STORAGE_KEY = "act-budget-profile-v1";
+
+function loadProfile() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return { ...initialProfile, ...parsed };
+  } catch {
+    return null;
+  }
+}
+
+function App() {
+  const [step, setStep] = useState(() => {
+    const saved = loadProfile();
+    return saved && saved.__completed ? 5 : 0;
+  });
+  const [profile, setProfile] = useState(() => loadProfile() || initialProfile);
+  const [showAll, setShowAll] = useState(false);
+
+  // Persist profile on every change
+  React.useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+    } catch {}
+  }, [profile]);
+
+  const toggle = (key, value) => {
+    setProfile((p) => {
+      const arr = p[key] || [];
+      return {
+        ...p,
+        [key]: arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value],
+      };
+    });
+  };
+
+  const set = (key, value) => setProfile((p) => ({ ...p, [key]: value }));
+
+  const scored = useMemo(() => {
+    return BUDGET_ITEMS.map((item) => {
+      const score = clamp(item.relevance(profile), 0, 100);
+      return { ...item, score, whyText: item.why(profile) };
+    }).sort((a, b) => b.score - a.score);
+  }, [profile]);
+
+  const topItems = showAll ? scored : scored.slice(0, 8);
+
+  const overallScore = useMemo(() => {
+    if (scored.length === 0) return 0;
+    const avg = scored.reduce((s, i) => s + i.score, 0) / scored.length;
+    return Math.round(avg);
+  }, [scored]);
+
+  const byCategory = useMemo(() => {
+    const map = {};
+    for (const item of scored) {
+      if (!map[item.category]) map[item.category] = [];
+      map[item.category].push(item);
+    }
+    return map;
+  }, [scored]);
+
+  const started = step > 0;
+
+  return (
+    <div className="page">
+      <style>{css}</style>
+
+      <header className="masthead">
+        <div className="masthead-inner">
+          <div className="seal" aria-hidden="true">
+            <svg viewBox="0 0 100 100" width="44" height="44">
+              <circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" strokeWidth="2" />
+              <circle cx="50" cy="50" r="36" fill="none" stroke="currentColor" strokeWidth="1" />
+              <path d="M50 18 L74 62 L26 62 Z" fill="currentColor" opacity="0.85" />
+              <circle cx="50" cy="50" r="6" fill="currentColor" />
+            </svg>
+          </div>
+          <div>
+            <p className="eyebrow">Australian Capital Territory · 2026–27</p>
+            <h1>Your Budget, Personally</h1>
+          </div>
+        </div>
+      </header>
+
+      {!started && (
+        <section className="intro">
+          <div className="intro-inner">
+            {profile.__completed && (
+              <div className="welcome-back">
+                <span>You've already filled this in on this device.</span>
+                <button className="btn-text" onClick={() => setStep(5)}>View my saved statement →</button>
+              </div>
+            )}
+            <p className="lede">
+              Each year the ACT Government hands down a Budget covering everything from
+              hospitals to housing to basketball courts. Most of it isn't written for
+              <em> you</em> specifically — so this is.
+            </p>
+            <p>
+              Answer a few questions about your household and we'll produce a personal
+              statement: which 2026–27 Budget measures are likely to affect you, why,
+              and roughly how much.
+            </p>
+            <button className="btn-primary" onClick={() => setStep(1)}>
+              Start my statement
+            </button>
+            <p className="fine-print">
+              Your answers are saved only in this browser (localStorage) — nothing is sent to a
+              server. This is an illustrative guide based on the public "ACT Budget at a Glance
+              2026–27" — not financial or legal advice.
+            </p>
+          </div>
+        </section>
+      )}
+
+      {started && step === 1 && (
+        <FormStep
+          title="About you"
+          subtitle="Section 1 of 4 — Demographics & location"
+          onNext={() => setStep(2)}
+          onBack={() => setStep(0)}
+        >
+          <Field label="Age">
+            <input
+              type="number"
+              min="0"
+              max="110"
+              value={profile.age}
+              onChange={(e) => set("age", clamp(parseInt(e.target.value || "0", 10), 0, 110))}
+              className="text-input small"
+            />
+          </Field>
+
+          <Field label="Gender (optional, refines health items)">
+            <select value={profile.gender} onChange={(e) => set("gender", e.target.value)} className="select">
+              <option value="">Prefer not to say</option>
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+              <option value="other">Other / non-binary</option>
+            </select>
+          </Field>
+
+          <Field label="Which part of Canberra do you live in?">
+            <select value={profile.region} onChange={(e) => set("region", e.target.value)} className="select">
+              <option value="">Select a region</option>
+              {REGIONS.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Household type">
+            <RadioRow
+              name="household"
+              value={profile.household}
+              onChange={(v) => set("household", v)}
+              options={[
+                { value: "single", label: "Single person" },
+                { value: "couple", label: "Couple, no kids" },
+                { value: "family", label: "Family with kids" },
+                { value: "sharehouse", label: "Share house" },
+                { value: "other", label: "Other" },
+              ]}
+            />
+          </Field>
+
+          <Field label="Background">
+            <CheckRow
+              checked={profile.immigrant}
+              onChange={() => set("immigrant", !profile.immigrant)}
+              label="I migrated to Australia (settlement support may be relevant)"
+            />
+            <CheckRow
+              checked={profile.indigenous}
+              onChange={() => set("indigenous", !profile.indigenous)}
+              label="I identify as Aboriginal and/or Torres Strait Islander"
+            />
+            <CheckRow
+              checked={profile.lowIncome}
+              onChange={() => set("lowIncome", !profile.lowIncome)}
+              label="My household is currently feeling cost-of-living pressure"
+            />
+            <CheckRow
+              checked={profile.disability}
+              onChange={() => set("disability", !profile.disability)}
+              label="Someone in my household has a disability (NDIS or similar)"
+            />
+            <CheckRow
+              checked={profile.ndisParticipant}
+              onChange={() => set("ndisParticipant", !profile.ndisParticipant)}
+              label="Someone in my household is an NDIS participant"
+            />
+            <CheckRow
+              checked={profile.carer}
+              onChange={() => set("carer", !profile.carer)}
+              label="I'm a carer for a family member"
+            />
+            <CheckRow
+              checked={profile.chronicCondition}
+              onChange={() => set("chronicCondition", !profile.chronicCondition)}
+              label="Someone in my household manages a chronic health condition"
+            />
+            <CheckRow
+              checked={profile.mentalHealthSupport}
+              onChange={() => set("mentalHealthSupport", !profile.mentalHealthSupport)}
+              label="Someone in my household accesses mental health support services"
+            />
+            <CheckRow
+              checked={profile.pensioner}
+              onChange={() => set("pensioner", !profile.pensioner)}
+              label="I receive a pension"
+            />
+            <CheckRow
+              checked={profile.veteran}
+              onChange={() => set("veteran", !profile.veteran)}
+              label="I'm a veteran / DVA Gold Card holder"
+            />
+            <CheckRow
+              checked={profile.volunteers}
+              onChange={() => set("volunteers", !profile.volunteers)}
+              label="I volunteer with a community organisation"
+            />
+          </Field>
+        </FormStep>
+      )}
+
+      {started && step === 2 && (
+        <FormStep
+          title="Work & money"
+          subtitle="Section 2 of 4 — Employment and finances"
+          onNext={() => setStep(3)}
+          onBack={() => setStep(1)}
+        >
+          <Field label="Employment situation">
+            <RadioRow
+              name="employment"
+              value={profile.employment}
+              onChange={(v) => set("employment", v)}
+              options={[
+                { value: "employee", label: "Employee (private sector)" },
+                { value: "publicServant", label: "ACT public servant" },
+                { value: "smallBusiness", label: "Small business owner" },
+                { value: "unemployed", label: "Unemployed / job seeking" },
+                { value: "retired", label: "Retired" },
+              ]}
+            />
+          </Field>
+
+          <Field label="">
+            <CheckRow
+              checked={profile.startingBusiness}
+              onChange={() => set("startingBusiness", !profile.startingBusiness)}
+              label="I'm thinking about starting or buying premises for a business"
+            />
+            <CheckRow
+              checked={profile.techWorker}
+              onChange={() => set("techWorker", !profile.techWorker)}
+              label="I work in tech, screen, digital or gaming"
+            />
+            <CheckRow
+              checked={profile.appliesForLegalAid}
+              onChange={() => set("appliesForLegalAid", !profile.appliesForLegalAid)}
+              label="I might need Legal Aid or community legal help"
+            />
+          </Field>
+        </FormStep>
+      )}
+
+      {started && step === 3 && (
+        <FormStep
+          title="Home & housing"
+          subtitle="Section 3 of 4 — Where and how you live"
+          onNext={() => setStep(4)}
+          onBack={() => setStep(2)}
+        >
+          <Field label="Housing situation">
+            <RadioRow
+              name="tenure"
+              value={profile.tenure}
+              onChange={(v) => set("tenure", v)}
+              options={[
+                { value: "owner", label: "I own my home" },
+                { value: "renting", label: "I rent" },
+                { value: "buying", label: "I'm looking to buy" },
+                { value: "publicHousing", label: "I'm a public/community housing tenant" },
+              ]}
+            />
+          </Field>
+
+          {(profile.tenure === "buying" || profile.tenure === "owner") && (
+            <Field label="Buying details">
+              <CheckRow
+                checked={profile.firstHomeBuyer}
+                onChange={() => set("firstHomeBuyer", !profile.firstHomeBuyer)}
+                label="This would be (or was recently) my first home"
+              />
+              <CheckRow
+                checked={profile.downsizing}
+                onChange={() => set("downsizing", !profile.downsizing)}
+                label="I'm considering downsizing into a unit or townhouse"
+              />
+              <CheckRow
+                checked={profile.rentalProperty}
+                onChange={() => set("rentalProperty", !profile.rentalProperty)}
+                label="I own an investment/rental property in the ACT"
+              />
+            </Field>
+          )}
+
+          {profile.tenure === "publicHousing" && (
+            <Field label="">
+              <CheckRow
+                checked={profile.publicHousing}
+                onChange={() => set("publicHousing", !profile.publicHousing)}
+                label="Confirm: I'm a current public housing tenant"
+              />
+            </Field>
+          )}
+
+          <Field label="What kind of home (or home you'd consider)?">
+            <RadioRow
+              name="housingType"
+              value={profile.housingType}
+              onChange={(v) => set("housingType", v)}
+              options={[
+                { value: "house", label: "Detached house" },
+                { value: "unit", label: "Unit / townhouse / terrace" },
+                { value: "", label: "Not sure / doesn't apply" },
+              ]}
+            />
+          </Field>
+
+          <Field label="Your local area">
+            <CheckRow
+              checked={profile.bushfireArea}
+              onChange={() => set("bushfireArea", !profile.bushfireArea)}
+              label="I live near bushland, a nature reserve, or the urban edge"
+            />
+            <CheckRow
+              checked={profile.waterEfficiencyInterest}
+              onChange={() => set("waterEfficiencyInterest", !profile.waterEfficiencyInterest)}
+              label="I'm interested in water efficiency / sustainability upgrades"
+            />
+          </Field>
+
+          <Field label="Other">
+            <CheckRow
+              checked={profile.firearmsOwner}
+              onChange={() => set("firearmsOwner", !profile.firearmsOwner)}
+              label="I own registered firearms"
+            />
+            <CheckRow
+              checked={profile.travelSydney}
+              onChange={() => set("travelSydney", !profile.travelSydney)}
+              label="I regularly travel between Canberra and Sydney"
+            />
+          </Field>
+        </FormStep>
+      )}
+
+      {started && step === 4 && (
+        <FormStep
+          title="Family, study & lifestyle"
+          subtitle="Section 4 of 4 — Kids, education, transport and what you're into"
+          onNext={() => setStep(5)}
+          onBack={() => setStep(3)}
+          nextLabel="See my statement"
+          onNextOverride={() => {
+            setProfile((p) => ({ ...p, __completed: true }));
+            setStep(5);
+          }}
+        >
+          <Field label="Do you have children at home?">
+            <RadioRow
+              name="kids"
+              value={profile.kids ? "yes" : "no"}
+              onChange={(v) => set("kids", v === "yes")}
+              options={[
+                { value: "yes", label: "Yes" },
+                { value: "no", label: "No" },
+              ]}
+            />
+          </Field>
+
+          {profile.kids && (
+            <>
+              <Field label="Ages (select all that apply)">
+                <div className="chip-row">
+                  {[
+                    { value: "under5", label: "Under 5" },
+                    { value: "primary", label: "Primary school" },
+                    { value: "teen", label: "Teen / high school" },
+                  ].map((opt) => (
+                    <Chip
+                      key={opt.value}
+                      active={profile.kidsAges.includes(opt.value)}
+                      onClick={() => toggle("kidsAges", opt.value)}
+                    >
+                      {opt.label}
+                    </Chip>
+                  ))}
+                </div>
+              </Field>
+
+              <Field label="School type">
+                <RadioRow
+                  name="school"
+                  value={profile.school}
+                  onChange={(v) => set("school", v)}
+                  options={[
+                    { value: "public", label: "Public school" },
+                    { value: "private", label: "Private / independent school" },
+                    { value: "none", label: "Not yet school age / homeschool" },
+                  ]}
+                />
+              </Field>
+
+              <Field label="">
+                <CheckRow
+                  checked={profile.kidsNeeds}
+                  onChange={() => set("kidsNeeds", !profile.kidsNeeds)}
+                  label="My child may benefit from a developmental assessment (e.g. autism)"
+                />
+              </Field>
+            </>
+          )}
+
+          <Field label="Study">
+            <CheckRow
+              checked={profile.studyingUni}
+              onChange={() => set("studyingUni", !profile.studyingUni)}
+              label="I (or a household member) study at university"
+            />
+            <CheckRow
+              checked={profile.studyingTafe}
+              onChange={() => set("studyingTafe", !profile.studyingTafe)}
+              label="I (or a household member) study at TAFE / CIT"
+            />
+          </Field>
+
+          <Field label="How do you usually get around?">
+            <div className="chip-row">
+              {[
+                { key: "publicTransportUser", label: "Bus / light rail" },
+                { key: "driver", label: "Car" },
+                { key: "cyclist", label: "Bike" },
+              ].map((opt) => (
+                <Chip
+                  key={opt.key}
+                  active={profile[opt.key]}
+                  onClick={() => set(opt.key, !profile[opt.key])}
+                >
+                  {opt.label}
+                </Chip>
+              ))}
+            </div>
+          </Field>
+
+          <Field label="Sports you follow or play (select all that apply)">
+            <div className="chip-row">
+              {["basketball", "cricket", "AFL", "rugby", "swimming", "none"].map((s) => (
+                <Chip key={s} active={profile.sports.includes(s)} onClick={() => toggle("sports", s)}>
+                  {s === "AFL" ? "AFL" : s.charAt(0).toUpperCase() + s.slice(1)}
+                </Chip>
+              ))}
+            </div>
+          </Field>
+
+          <Field label="Other interests (select all that apply)">
+            <div className="chip-row">
+              {[
+                { value: "arts", label: "Arts & culture" },
+                { value: "environment", label: "Environment / sustainability" },
+                { value: "events", label: "Festivals & major events" },
+              ].map((opt) => (
+                <Chip key={opt.value} active={profile.interests.includes(opt.value)} onClick={() => toggle("interests", opt.value)}>
+                  {opt.label}
+                </Chip>
+              ))}
+            </div>
+          </Field>
+
+          <Field label="">
+            <CheckRow
+              checked={profile.petOwner}
+              onChange={() => set("petOwner", !profile.petOwner)}
+              label="I have a pet"
+            />
+          </Field>
+        </FormStep>
+      )}
+
+      {started && step === 5 && (
+        <section className="results">
+          <div className="results-inner">
+            <div className="statement-header">
+              <div>
+                <p className="eyebrow">Personal Budget Statement</p>
+                <h2>How the 2026–27 Budget touches your life</h2>
+                <p className="statement-meta">
+                  {profile.region ? `${profile.region} · ` : ""}
+                  {profile.age} yrs
+                  {profile.tenure ? ` · ${tenureLabel(profile.tenure)}` : ""}
+                  {profile.kids ? " · Family with children" : ""}
+                </p>
+              </div>
+              <div className={`score-seal score-${relevanceLabel(overallScore).tone}`}>
+                <span className="score-number">{overallScore}</span>
+                <span className="score-label">overall<br />relevance</span>
+              </div>
+            </div>
+
+            <p className="statement-summary">
+              Of the {scored.length} headline measures in this Budget,{" "}
+              <strong>{scored.filter((i) => i.score >= 75).length} are likely to directly affect you</strong>,{" "}
+              {scored.filter((i) => i.score >= 40 && i.score < 75).length} have some relevance, and the rest are
+              broader community investments that benefit Canberra as a whole — including you, just less directly.
+            </p>
+
+            <div className="ledger">
+              <div className="ledger-head">
+                <span>Measure</span>
+                <span className="ledger-head-figure">Figure</span>
+                <span className="ledger-head-score">Relevance</span>
+              </div>
+              {topItems.map((item) => (
+                <LedgerLine key={item.id} item={item} />
+              ))}
+            </div>
+
+            {!showAll && scored.length > 8 && (
+              <button className="btn-secondary" onClick={() => setShowAll(true)}>
+                Show all {scored.length} measures
+              </button>
+            )}
+
+            <div className="by-category">
+              <h3>By area of the Budget</h3>
+              <p className="category-rationale">
+                Each score is the average relevance (0–100) of every measure we found in that
+                category, based on your answers. A category scores high if most of its measures
+                are tailored to people like you (e.g. your tenure, location, family or interests);
+                it scores lower if most measures there are broad, Territory-wide investments that
+                apply to everyone roughly equally. Tap a line in the ledger above for the
+                reasoning behind each individual score.
+              </p>
+              <div className="category-grid">
+                {CATEGORY_ORDER.map((cat) => {
+                  const items = byCategory[cat] || [];
+                  const avg = Math.round(items.reduce((s, i) => s + i.score, 0) / items.length);
+                  return (
+                    <div key={cat} className={`category-card score-${relevanceLabel(avg).tone}`}>
+                      <div className="category-card-top">
+                        <h4>{cat}</h4>
+                        <span className="category-score">{avg}</span>
+                      </div>
+                      <div className="meter">
+                        <div className="meter-fill" style={{ width: `${avg}%` }} />
+                      </div>
+                      <p className="category-note">{relevanceLabel(avg).label}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="actions">
+              <button className="btn-secondary" onClick={() => setStep(1)}>
+                ← Edit my details
+              </button>
+              <button className="btn-secondary" onClick={() => {
+                try { localStorage.removeItem(STORAGE_KEY); } catch {}
+                setProfile(initialProfile);
+                setStep(0);
+                setShowAll(false);
+              }}>
+                Start over
+              </button>
+            </div>
+
+            <p className="fine-print">
+              Source: ACT Budget at a Glance 2026–27, ACT Treasury. This statement is a simplified,
+              illustrative guide generated from your inputs and does not constitute financial,
+              legal or eligibility advice. Check act.gov.au for official eligibility criteria.
+            </p>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function tenureLabel(t) {
+  return { owner: "Homeowner", renting: "Renter", buying: "Looking to buy", publicHousing: "Public housing tenant" }[t] || "";
+}
+
+function FormStep({ title, subtitle, children, onNext, onBack, nextLabel, onNextOverride }) {
+  return (
+    <section className="form-step">
+      <div className="form-inner">
+        <p className="eyebrow">{subtitle}</p>
+        <h2>{title}</h2>
+        <div className="form-body">{children}</div>
+        <div className="form-nav">
+          <button className="btn-text" onClick={onBack}>← Back</button>
+          <button className="btn-primary" onClick={onNextOverride || onNext}>{nextLabel || "Continue →"}</button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div className="field">
+      {label && <label className="field-label">{label}</label>}
+      <div className="field-body">{children}</div>
+    </div>
+  );
+}
+
+function CheckRow({ checked, onChange, label }) {
+  return (
+    <label className="check-row">
+      <input type="checkbox" checked={checked} onChange={onChange} />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+function RadioRow({ name, value, onChange, options }) {
+  return (
+    <div className="radio-row">
+      {options.map((opt) => (
+        <label key={opt.value} className={`radio-pill ${value === opt.value ? "active" : ""}`}>
+          <input
+            type="radio"
+            name={name}
+            value={opt.value}
+            checked={value === opt.value}
+            onChange={() => onChange(opt.value)}
+          />
+          <span>{opt.label}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function Chip({ active, onClick, children }) {
+  return (
+    <button type="button" className={`chip ${active ? "active" : ""}`} onClick={onClick}>
+      {children}
+    </button>
+  );
+}
+
+function LedgerLine({ item }) {
+  const [open, setOpen] = useState(false);
+  const tone = relevanceLabel(item.score);
+  return (
+    <div className={`ledger-line score-${tone.tone}`}>
+      <button className="ledger-row" onClick={() => setOpen((o) => !o)}>
+        <span className="ledger-cat">{item.category}</span>
+        <span className="ledger-title">{item.title}</span>
+        <span className="ledger-figure">{item.figure}</span>
+        <span className="ledger-score">
+          <span className="dot" />
+          {tone.label}
+        </span>
+        <span className="chevron">{open ? "−" : "+"}</span>
+      </button>
+      {open && (
+        <div className="ledger-detail">
+          <p>{item.detail}</p>
+          <p className="why"><strong>For you:</strong> {item.whyText}</p>
+          {item.source && (
+            <p className="source-link">
+              <a href={item.source} target="_blank" rel="noopener noreferrer">
+                Read this section in the Budget reference ↗
+              </a>
+              {" · "}
+              <a href={SOURCE_PDF} target="_blank" rel="noopener noreferrer">
+                Official PDF ↗
+              </a>
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const css = `
+@import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;0,700;1,500&family=Source+Sans+3:wght@400;500;600;700&display=swap');
+
+:root {
+  --ink: #25303d;
+  --paper: #f7f4ec;
+  --paper-deep: #efe9da;
+  --navy: #1c3a5e;
+  --navy-deep: #14293f;
+  --ochre: #c1862f;
+  --ochre-soft: #e6c896;
+  --high: #2f6b4f;
+  --high-bg: #e3efe7;
+  --mid: #b6791f;
+  --mid-bg: #f6ecd9;
+  --low: #8a8275;
+  --low-bg: #ece8e0;
+  --rule: #d8d0bd;
+  --shadow: 0 12px 28px -16px rgba(20, 40, 60, 0.35);
+}
+
+* { box-sizing: border-box; }
+
+.page {
+  font-family: 'Source Sans 3', system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+  background-image:
+    repeating-linear-gradient(180deg, transparent, transparent 39px, rgba(28,58,94,0.025) 40px);
+  min-height: 100vh;
+  line-height: 1.55;
+}
+
+h1, h2, h3, h4 {
+  font-family: 'Lora', Georgia, serif;
+  color: var(--navy-deep);
+  margin: 0;
+}
+
+.masthead {
+  background: var(--navy);
+  color: var(--paper);
+  padding: 28px 24px;
+  border-bottom: 4px solid var(--ochre);
+}
+.masthead-inner {
+  max-width: 880px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.seal { color: var(--ochre-soft); flex-shrink: 0; }
+.masthead h1 {
+  color: #fff;
+  font-size: 1.7rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ochre-soft);
+  margin: 0 0 4px;
+}
+.masthead .eyebrow { color: var(--ochre-soft); }
+
+.intro, .form-step, .results { padding: 40px 24px 64px; }
+.intro-inner, .form-inner, .results-inner { max-width: 720px; margin: 0 auto; }
+
+.lede { font-size: 1.2rem; color: var(--navy-deep); font-family: 'Lora', serif; font-style: italic; }
+.intro p { font-size: 1.02rem; }
+
+.btn-primary, .btn-secondary, .btn-text {
+  font-family: inherit;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.15s ease;
+}
+.btn-primary {
+  background: var(--navy);
+  color: #fff;
+  padding: 13px 28px;
+  border-radius: 3px;
+  font-size: 1rem;
+  margin-top: 8px;
+  box-shadow: var(--shadow);
+}
+.btn-primary:hover { background: var(--navy-deep); transform: translateY(-1px); }
+.btn-secondary {
+  background: transparent;
+  color: var(--navy);
+  border: 1.5px solid var(--navy);
+  padding: 10px 22px;
+  border-radius: 3px;
+  font-size: 0.92rem;
+  margin: 8px 8px 0 0;
+}
+.btn-secondary:hover { background: var(--paper-deep); }
+.btn-text {
+  background: none;
+  color: var(--navy);
+  padding: 10px 4px;
+  font-size: 0.95rem;
+  text-decoration: underline;
+}
+
+.fine-print {
+  font-size: 0.82rem;
+  color: #6b7280;
+  margin-top: 28px;
+  border-top: 1px dashed var(--rule);
+  padding-top: 14px;
+}
+
+/* Form */
+.form-step h2 { font-size: 1.5rem; margin-bottom: 24px; }
+.form-body { display: flex; flex-direction: column; gap: 22px; }
+.field-label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 8px;
+  color: var(--navy-deep);
+}
+.field-body { display: flex; flex-direction: column; gap: 8px; }
+
+.text-input, .select {
+  font-family: inherit;
+  font-size: 1rem;
+  padding: 10px 12px;
+  border: 1.5px solid var(--rule);
+  border-radius: 3px;
+  background: #fff;
+  color: var(--ink);
+}
+.text-input.small { width: 100px; }
+.text-input:focus, .select:focus, input:focus, button:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 1px;
+}
+
+.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 0.96rem;
+  cursor: pointer;
+  padding: 6px 0;
+}
+.check-row input { margin-top: 3px; width: 17px; height: 17px; accent-color: var(--navy); flex-shrink: 0; }
+
+.radio-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.radio-pill {
+  border: 1.5px solid var(--rule);
+  border-radius: 999px;
+  padding: 9px 18px;
+  font-size: 0.92rem;
+  cursor: pointer;
+  background: #fff;
+  transition: all 0.12s ease;
+}
+.radio-pill input { position: absolute; opacity: 0; pointer-events: none; }
+.radio-pill.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  font-family: inherit;
+  border: 1.5px solid var(--rule);
+  background: #fff;
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  color: var(--ink);
+  transition: all 0.12s ease;
+}
+.chip.active { background: var(--ochre); border-color: var(--ochre); color: #fff; }
+
+.form-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 32px; }
+
+/* Results */
+.statement-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  border-bottom: 3px double var(--rule);
+  padding-bottom: 20px;
+  margin-bottom: 8px;
+}
+.statement-header h2 { font-size: 1.55rem; margin: 4px 0 6px; }
+.statement-meta { font-size: 0.9rem; color: #6b7280; margin: 0; }
+
+.score-seal {
+  flex-shrink: 0;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  border: 3px solid currentColor;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Lora', serif;
+  transform: rotate(-6deg);
+}
+.score-number { font-size: 1.9rem; font-weight: 700; line-height: 1; }
+.score-label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; text-align: center; line-height: 1.2; margin-top: 2px; }
+
+.score-high { color: var(--high); }
+.score-mid { color: var(--mid); }
+.score-low { color: var(--low); }
+
+.statement-summary { font-size: 1.02rem; margin: 18px 0 28px; }
+
+.ledger { border-top: 2px solid var(--navy-deep); }
+.ledger-head {
+  display: grid;
+  grid-template-columns: 1fr 2.4fr 1fr 1fr 24px;
+  gap: 12px;
+  padding: 8px 4px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #8b8576;
+  font-weight: 600;
+  border-bottom: 1px solid var(--rule);
+}
+.ledger-head-figure, .ledger-head-score { text-align: right; }
+
+.ledger-line { border-bottom: 1px solid var(--rule); }
+.ledger-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 2.4fr 1fr 1fr 24px;
+  gap: 12px;
+  align-items: center;
+  background: none;
+  border: none;
+  font-family: inherit;
+  text-align: left;
+  padding: 14px 4px;
+  cursor: pointer;
+  color: var(--ink);
+}
+.ledger-row:hover { background: rgba(28,58,94,0.04); }
+.ledger-cat { font-size: 0.75rem; color: #9b9382; text-transform: uppercase; letter-spacing: 0.06em; }
+.ledger-title { font-weight: 600; font-size: 0.98rem; }
+.ledger-figure { font-family: 'Lora', serif; font-weight: 600; text-align: right; color: var(--navy-deep); }
+.ledger-score {
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+  font-size: 0.85rem; font-weight: 600;
+}
+.ledger-score .dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.score-high .ledger-score, .score-high .dot { color: var(--high); }
+.score-mid .ledger-score, .score-mid .dot { color: var(--mid); }
+.score-low .ledger-score, .score-low .dot { color: var(--low); }
+.chevron { text-align: center; font-size: 1.2rem; color: #9b9382; }
+
+.ledger-detail {
+  padding: 0 4px 18px 4px;
+  font-size: 0.92rem;
+  color: #4b5563;
+}
+.ledger-detail .why { color: var(--navy-deep); margin-top: 8px; }
+.source-link { margin-top: 10px; }
+.source-link a {
+  color: var(--ochre);
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-decoration: none;
+  border-bottom: 1px dashed var(--ochre);
+}
+.source-link a:hover { border-bottom-style: solid; }
+
+@media (max-width: 640px) {
+  .ledger-head, .ledger-row {
+    grid-template-columns: 1fr 1fr 24px;
+    grid-template-areas:
+      "cat cat chev"
+      "title title chev"
+      "figure score chev";
+  }
+  .ledger-head { display: none; }
+  .ledger-cat { grid-area: cat; }
+  .ledger-title { grid-area: title; }
+  .ledger-figure { grid-area: figure; text-align: left; }
+  .ledger-score { grid-area: score; justify-content: flex-start; }
+  .chevron { grid-area: chev; }
+}
+
+/* Category breakdown */
+.by-category { margin-top: 40px; }
+.by-category h3 { font-size: 1.1rem; margin-bottom: 14px; }
+.category-rationale {
+  font-size: 0.88rem;
+  color: #6b7280;
+  margin: -4px 0 16px;
+  max-width: 640px;
+}
+.category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.category-card {
+  background: #fff;
+  border: 1.5px solid var(--rule);
+  border-radius: 4px;
+  padding: 14px 16px;
+}
+.category-card-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.category-card h4 { font-size: 0.92rem; font-weight: 600; }
+.category-score { font-family: 'Lora', serif; font-weight: 700; font-size: 1.1rem; }
+.score-high .category-score { color: var(--high); }
+.score-mid .category-score { color: var(--mid); }
+.score-low .category-score { color: var(--low); }
+
+.meter { height: 6px; background: var(--paper-deep); border-radius: 3px; overflow: hidden; }
+.meter-fill { height: 100%; }
+.score-high .meter-fill { background: var(--high); }
+.score-mid .meter-fill { background: var(--mid); }
+.score-low .meter-fill { background: var(--low); }
+
+.category-note { font-size: 0.8rem; color: #8b8576; margin: 8px 0 0; }
+
+.actions { margin-top: 32px; }
+
+.welcome-back {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--paper-deep);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  font-size: 0.9rem;
+  flex-wrap: wrap;
+}
+.welcome-back .btn-text { padding: 0; white-space: nowrap; }
+`;
+
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
