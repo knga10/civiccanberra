@@ -4,8 +4,7 @@ A small static web app that turns the ACT Government's 2026–27 Budget into a
 personal statement: answer a few questions about your household, and see
 which Budget measures are likely to affect you, why, and how to read more.
 
-**Live structure:** open `index.html` — that's the whole app.
-
+**Live structure:** https://knga10.github.io/civiccanberra
 ---
 
 ## Why this exists
@@ -74,14 +73,6 @@ reading more about, not to determine your actual entitlements. Always
 check [act.gov.au](https://www.act.gov.au) or the official Budget
 documents for eligibility criteria and exact figures.
 
-## Deploying
-
-All three files need to live in the same folder (ideally repo root) so the
-relative links between `index.html` and `budget-reference.html` resolve
-correctly.
-
-- **GitHub Pages**: Settings → Pages → Deploy from branch → `main` / root.
-- **Vercel**: Import the repo, no build settings needed (static files).
 
 ## Updating for a future Budget
 
